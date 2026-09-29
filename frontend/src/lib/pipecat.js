@@ -1,4 +1,3 @@
-
 import { PipecatClient } from "@pipecat-ai/client-js";
 import { SmallWebRTCTransport } from "@pipecat-ai/small-webrtc-transport";
 
@@ -6,19 +5,16 @@ export function createPipecatClient({
   onUserTranscript,
   onBotTranscript,
 }) {
-
-
   const transport = new SmallWebRTCTransport();
 
   const client = new PipecatClient({
     transport,
-
     enableMic: true,
     enableCam: false,
 
     callbacks: {
       onTransportStateChanged: (state) => {
-      
+        console.log("Transport:", state);
       },
 
       onConnected: () => {
@@ -29,51 +25,22 @@ export function createPipecatClient({
         console.log("Pipecat disconnected");
       },
 
-      onBotReady: () => {
-      
-      },
-
-      onUserStartedSpeaking: () => {
-        
-      },
-
-      onUserStoppedSpeaking: () => {
-      
-      },
-
-      onBotStartedSpeaking: () => {
-        
-      },
-
-      onBotStoppedSpeaking: () => {
-       
-      },
-
       onUserTranscript: (data) => {
-        
-
         if (data?.final && data?.text?.trim()) {
           onUserTranscript?.(data.text.trim());
         }
       },
 
       onBotTranscript: (data) => {
-       
-
         if (data?.text?.trim()) {
           onBotTranscript?.(data.text.trim());
         }
       },
 
       onTrackStarted: (track, participant) => {
-        
+        console.log("Track started:", track?.kind, participant);
 
-        if (participant?.local) {
-     ;
-          return;
-        }
-
-        if (track.kind !== "audio") {
+        if (participant?.local || track.kind !== "audio") {
           return;
         }
 
@@ -84,16 +51,13 @@ export function createPipecatClient({
           return;
         }
 
-        console.log("Attaching AI audio track");
-
         const stream = new MediaStream([track]);
 
         audio.srcObject = stream;
         audio.autoplay = true;
         audio.playsInline = true;
 
-        audio
-          .play()
+        audio.play()
           .then(() => {
             console.log("AI audio playback started");
           })
