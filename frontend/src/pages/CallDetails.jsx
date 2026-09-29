@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import {
-
   Link,
   useParams,
+  useNavigate,
 } from "react-router-dom";
 import {
   FiArrowLeft,
@@ -15,17 +15,33 @@ import {
   FiLoader,
   FiMessageSquare,
   FiAirplay,
+  FiTrash2,
 } from "react-icons/fi";
 
-import { getCall } from "../lib/api";
+import { getCall, deleteCall } from "../lib/api";
 
 
 function CallDetails() {
   const { id } = useParams();
+  const navigate = useNavigate();
 
   const [call, setCall] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function handleDelete() {
+    if (!window.confirm("Delete this call and all its data? This cannot be undone.")) return;
+    try {
+      setDeleting(true);
+      await deleteCall(id);
+      navigate("/");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to delete call.");
+      setDeleting(false);
+    }
+  }
 
   useEffect(() => {
     async function loadCall() {
@@ -95,14 +111,29 @@ function CallDetails() {
 
       <div className="mx-auto max-w-4xl px-4 sm:px-6 relative z-10">
 
-        {/* Back Button */}
-        <Link
-          to="/"
-          className="inline-flex items-center space-x-2 text-xs font-mono uppercase tracking-wider text-zinc-400 transition-colors hover:text-white mb-6"
-        >
-          <FiArrowLeft className="h-4 w-4" />
-          <span>Back to calls</span>
-        </Link>
+        {/* Back Button + Delete */}
+        <div className="flex items-center justify-between mb-6">
+          <Link
+            to="/"
+            className="inline-flex items-center space-x-2 text-xs font-mono uppercase tracking-wider text-zinc-400 transition-colors hover:text-white"
+          >
+            <FiArrowLeft className="h-4 w-4" />
+            <span>Back to calls</span>
+          </Link>
+
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-red-500/30 bg-red-950/40 text-red-300 text-xs font-semibold hover:bg-red-900/60 hover:border-red-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deleting ? (
+              <FiLoader className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FiTrash2 className="h-3.5 w-3.5" />
+            )}
+            {deleting ? "Deleting..." : "Delete Call"}
+          </button>
+        </div>
 
         {/* Header & Overview Card */}
         <div className="rounded-3xl border border-white/10 bg-white/[0.03] backdrop-blur-2xl p-6 sm:p-8 shadow-2xl shadow-black/80">

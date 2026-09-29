@@ -1,6 +1,6 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -45,6 +45,10 @@ export default {
       url.pathname.startsWith("/calls/")
     ) {
       const id = url.pathname.split("/")[2];
+
+      if (!id) {
+        return json({ error: "Call ID is required" }, 400);
+      }
 
       const call = await env.DB
         .prepare(
@@ -102,6 +106,10 @@ export default {
         metrics = {},
       } = body;
 
+      if (!id || !startTime) {
+        return json({ error: "id and startTime are required" }, 400);
+      }
+
       await env.DB
         .prepare(
           `INSERT INTO calls
@@ -152,6 +160,45 @@ export default {
         },
         201
       );
+    }
+
+    // DELETE /calls/:id
+    if (
+      request.method === "DELETE" &&
+      url.pathname.startsWith("/calls/")
+    ) {
+      const id = url.pathname.split("/")[2];
+
+      if (!id) {
+        return json({ error: "Call ID is required" }, 400);
+      }
+
+      const call = await env.DB
+        .prepare("SELECT id FROM calls WHERE id = ?")
+        .bind(id)
+        .first();
+
+      if (!call) {
+        return json({ error: "Call not found" }, 404);
+      }
+
+      // Delete child records first to respect FK integrity
+      await env.DB
+        .prepare("DELETE FROM transcripts WHERE call_id = ?")
+        .bind(id)
+        .run();
+
+      await env.DB
+        .prepare("DELETE FROM call_metrics WHERE call_id = ?")
+        .bind(id)
+        .run();
+
+      await env.DB
+        .prepare("DELETE FROM calls WHERE id = ?")
+        .bind(id)
+        .run();
+
+      return json({ message: "Call deleted successfully", id });
     }
 
     return json(
