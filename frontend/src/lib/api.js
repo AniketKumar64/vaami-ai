@@ -1,0 +1,43 @@
+const API_URL = import.meta.env.VITE_API_URL;
+
+export async function getCalls() {
+  const response = await fetch(`${API_URL}/calls`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch calls");
+  }
+
+  return response.json();
+}
+
+export async function getCall(id) {
+  const response = await fetch(`${API_URL}/calls/${id}`);
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch call");
+  }
+
+  return response.json();
+}
+
+export async function saveCall(call) {
+  const response = await fetch(`${API_URL}/calls`, {
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json",
+    },
+
+    body: JSON.stringify(call),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+
+    throw new Error(
+      `Failed to save call: ${error}`
+    );
+  }
+
+  return response.json();
+}
