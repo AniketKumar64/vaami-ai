@@ -3,3 +3,6 @@ fastapi
 uvicorn
 python-dotenv
 aiohttp
+deepgram-sdk
+groq
+elevenlabs
