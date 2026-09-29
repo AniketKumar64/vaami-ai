@@ -1,3 +1,5 @@
 pipecat-ai
+fastapi
+uvicorn
 python-dotenv
 aiohttp
