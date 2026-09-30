@@ -1,21 +1,52 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createPipecatClient } from "../lib/pipecat";
+import { createPipecatClient, isLocalPipecat, publicWebSocketUrl } from "../lib/pipecat";
 import { saveCall } from "../lib/api.js";
+const PLACEHOLDER_PIPECAT_URL = "https://your-pipecat-server.com";
+
+function pipecatBaseUrl() {
+  const value = (import.meta.env.VITE_PIPECAT_URL || "")
+    .trim()
+    .replace(/\/$/, "");
+
+  if (!value || value === PLACEHOLDER_PIPECAT_URL) {
+    throw new Error(
+      "Set VITE_PIPECAT_URL to your Pipecat HTTPS origin, then rebuild the frontend.",
+    );
+  }
+
+  return value;
+}
+
+function errorMessage(error, fallback) {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
 function CallPage() {
   const navigate = useNavigate();
   const [status, setStatus] = useState("ready");
   const [pipecat, setPipecat] = useState(null);
   const [transcript, setTranscript] = useState([]);
   const [duration, setDuration] = useState(0);
+  const [error, setError] = useState("");
   const audioRef = useRef(null);
   const startTimeRef = useRef(null);
   const timerRef = useRef(null);
   const transcriptRef = useRef([]);
+  const pipecatRef = useRef(null);
+  const pendingCallIdRef = useRef(null);
+  const endTimeRef = useRef(null);
   useEffect(() => {
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+      }
+      const client = pipecatRef.current;
+      pipecatRef.current = null;
+      if (client) {
+        client.disconnect().catch((disconnectError) => {
+          console.error(disconnectError);
+        });
       }
     };
   }, []);
@@ -24,25 +55,71 @@ function CallPage() {
     transcriptRef.current.push(message);
     setTranscript((previous) => [...previous, message]);
   }
-  async function startCall() {
+  async function releaseClient() {
+    const client = pipecatRef.current;
+    pipecatRef.current = null;
+    setPipecat(null);
+    if (!client) return;
     try {
+      await client.disconnect();
+    } catch (disconnectError) {
+      console.error(disconnectError);
+    }
+  }
+  async function startCall() {
+    setError("");
+    try {
+      const baseUrl = pipecatBaseUrl();
       setStatus("connecting");
       setTranscript([]);
       transcriptRef.current = [];
+      pendingCallIdRef.current = null;
+      endTimeRef.current = null;
       setDuration(0);
       startTimeRef.current = new Date();
+      const useWebSocket = !isLocalPipecat(baseUrl);
       const client = createPipecatClient({
+        useWebSocket,
         onUserTranscript: (text) => {
           addTranscript("user", text);
         },
         onBotTranscript: (text) => {
           addTranscript("assistant", text);
         },
+        onError: (callError) => {
+          setError(errorMessage(callError, "The voice connection failed."));
+        },
       });
+      pipecatRef.current = client;
       await client.initDevices();
-      await client.connect({
-        webrtcRequestParams: { endpoint: import.meta.env.VITE_PIPECAT_URL + "/api/offer" },
+      let connectFailure;
+      const connectPromise = (
+        useWebSocket
+          ? client.connect({ wsUrl: publicWebSocketUrl(baseUrl) })
+          : client.startBotAndConnect({ endpoint: `${baseUrl}/start` })
+      ).catch((connectError) => {
+        connectFailure = connectError;
       });
+      let timeoutId;
+      try {
+        await Promise.race([
+          connectPromise,
+          new Promise((_, reject) => {
+            timeoutId = setTimeout(() => {
+              reject(
+                new Error(
+                  "The voice server did not finish connecting. On Render this needs the provider API keys.",
+                ),
+              );
+            }, 25000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      if (connectFailure) {
+        throw connectFailure;
+      }
       setPipecat(client);
       setStatus("connected");
       timerRef.current = setInterval(() => {
@@ -52,15 +129,23 @@ function CallPage() {
         );
         setDuration(elapsed);
       }, 1000);
-    } catch (error) {
+    } catch (startError) {
+      console.error(startError);
+      setError(errorMessage(startError, "Could not start the call."));
       setStatus("ready");
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
+      await releaseClient();
     }
   }
   async function endCall() {
-    const endTime = new Date();
+    setError("");
+    if (!endTimeRef.current) {
+      endTimeRef.current = new Date();
+    }
+    const endTime = endTimeRef.current;
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -71,11 +156,12 @@ function CallPage() {
         (endTime.getTime() - startTimeRef.current.getTime()) / 1000,
       );
     }
+    if (!pendingCallIdRef.current) {
+      pendingCallIdRef.current = `call-${Date.now()}`;
+    }
+    const callId = pendingCallIdRef.current;
     try {
-      if (pipecat) {
-        await pipecat.disconnect();
-      }
-      const callId = `call-${Date.now()}`;
+      await releaseClient();
       await saveCall({
         id: callId,
         startTime: startTimeRef.current
@@ -86,14 +172,16 @@ function CallPage() {
         transcript: transcriptRef.current,
         metrics: {},
       });
-      setPipecat(null);
+      pendingCallIdRef.current = null;
+      endTimeRef.current = null;
       setStatus("ended");
       setTimeout(() => {
         navigate(`/calls/${callId}`);
       }, 500);
-    } catch (error) {
-      setPipecat(null);
-      setStatus("ended");
+    } catch (saveError) {
+      console.error(saveError);
+      setError(errorMessage(saveError, "Could not save the call."));
+      setStatus("save_failed");
     }
   }
   function formatDuration(seconds) {
@@ -180,6 +268,19 @@ function CallPage() {
                   Call ended{" "}
                 </div>
               )}{" "}
+              {status === "save_failed" && (
+                <div className="space-y-3">
+                  {" "}
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-red-500/30 bg-red-950/40 text-red-200 text-sm font-medium">
+                    {" "}
+                    Call ended, save failed{" "}
+                  </div>{" "}
+                  <p className="text-xs text-zinc-500">
+                    {" "}
+                    The voice session is closed. Retry to store this transcript.{" "}
+                  </p>{" "}
+                </div>
+              )}{" "}
             </div>{" "}
             <audio
               id="bot-audio"
@@ -188,9 +289,14 @@ function CallPage() {
               playsInline
               className="hidden"
             />{" "}
-            <div className="pt-4 border-t border-white/5">
+            <div className="pt-4 border-t border-white/5 space-y-3">
               {" "}
-              {status !== "connected" && (
+              {error && (
+                <p className="rounded-2xl border border-red-500/30 bg-red-950/40 px-4 py-3 text-sm text-red-100">
+                  {error}
+                </p>
+              )}{" "}
+              {(status === "ready" || status === "connecting" || status === "ended") && (
                 <button
                   onClick={startCall}
                   disabled={status === "connecting"}
@@ -202,6 +308,15 @@ function CallPage() {
                   ) : (
                     <span>Start Call</span>
                   )}{" "}
+                </button>
+              )}{" "}
+              {status === "save_failed" && (
+                <button
+                  onClick={endCall}
+                  className="w-full rounded-2xl bg-white py-4 font-semibold text-black transition-all duration-200 hover:bg-zinc-200 active:scale-[0.99] flex items-center justify-center gap-2"
+                >
+                  {" "}
+                  <span>Retry save</span>{" "}
                 </button>
               )}{" "}
               {status === "connected" && (

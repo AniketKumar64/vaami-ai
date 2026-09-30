@@ -1,7 +1,15 @@
 const API_URL = import.meta.env.VITE_API_URL;
 
+function apiUrl(path) {
+  if (!API_URL) {
+    throw new Error("Set VITE_API_URL to your Cloudflare Worker URL.");
+  }
+
+  return `${API_URL}${path}`;
+}
+
 export async function getCalls() {
-  const response = await fetch(`${API_URL}/calls`);
+  const response = await fetch(apiUrl("/calls"));
 
   if (!response.ok) {
     throw new Error("Failed to fetch calls");
@@ -11,7 +19,7 @@ export async function getCalls() {
 }
 
 export async function getCall(id) {
-  const response = await fetch(`${API_URL}/calls/${id}`);
+  const response = await fetch(apiUrl(`/calls/${id}`));
 
   if (!response.ok) {
     throw new Error("Failed to fetch call");
@@ -21,7 +29,7 @@ export async function getCall(id) {
 }
 
 export async function saveCall(call) {
-  const response = await fetch(`${API_URL}/calls`, {
+  const response = await fetch(apiUrl("/calls"), {
     method: "POST",
 
     headers: {
@@ -43,7 +51,7 @@ export async function saveCall(call) {
 }
 
 export async function deleteCall(id) {
-  const response = await fetch(`${API_URL}/calls/${id}`, {
+  const response = await fetch(apiUrl(`/calls/${id}`), {
     method: "DELETE",
   });
 
